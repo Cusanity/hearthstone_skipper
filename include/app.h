@@ -26,6 +26,8 @@ private slots:
 
     void onFunction3();
 
+    void onAccessibilityAction();
+
 private:
     void createActions();
 
@@ -35,6 +37,7 @@ public:
     static Skipper* skipper;
     static App* instance() { return _instance; }
     void setFloatButtonEnabled(bool enabled);
+    void checkAccessibility();
 private:
 
     QSystemTrayIcon* trayIcon = nullptr;
@@ -44,6 +47,7 @@ private:
     QAction* function1Action{};
     QAction* function2Action{};
     QAction* function3Action{};
+    QAction* accessibilityAction{};
     QAction* quitAction{};
     SettingDialog* settingDialog = nullptr;
     FloatButton* floatButton = nullptr;

@@ -24,6 +24,7 @@ class Skipper : public QObject {
     void getConnection();
     void handleGetConnectionThenKill(const QString &error, long code, const QByteArray &body);
     void handleKillConnection(const QString &error, long code, const QByteArray &body);
+    void killAnotherConnection(const QString &error, long code, const QByteArray &body);
 
   private:
     ConfigAwareQEasy *_qeasy;

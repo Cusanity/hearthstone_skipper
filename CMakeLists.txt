@@ -71,6 +71,10 @@ set_target_properties(skipper PROPERTIES
         MACOSX_BUNDLE_BUNDLE_VERSION ${BUNDLE_VERSION}
         MACOSX_BUNDLE_SHORT_VERSION_STRING ${APP_VERSION}
 )
+add_custom_command(TARGET skipper POST_BUILD
+        COMMAND codesign --force --sign - "${CMAKE_CURRENT_BINARY_DIR}/skipper.app"
+        COMMENT "Signing skipper.app with ad-hoc signature"
+)
 set_target_properties(qcurl PROPERTIES
         AUTOMOC ON
 )

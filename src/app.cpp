@@ -5,9 +5,11 @@
 #include "skipper.h"
 
 #include <QApplication>
-#include <QMainWindow>
+#include <QCursor>
 #include <QDesktopServices>
+#include <QMainWindow>
 #include <QUrl>
+#include <ApplicationServices/ApplicationServices.h>
 
 Skipper *App::skipper;
 App *App::_instance = nullptr;
@@ -62,6 +64,9 @@ void App::createActions() {
     function3Action = new QAction(tr("打开设置"), this);
     connect(function3Action, &QAction::triggered, this, &App::onFunction3);
 
+    accessibilityAction = new QAction(tr("辅助功能权限检查..."), this);
+    connect(accessibilityAction, &QAction::triggered, this, &App::onAccessibilityAction);
+
     quitAction = new QAction(tr("退出"), this);
     connect(quitAction, &QAction::triggered, this, &QApplication::quit);
 }
@@ -71,13 +76,21 @@ void App::createTrayIcon() {
     trayIconMenu->addAction(function1Action);
     trayIconMenu->addAction(function2Action);
     trayIconMenu->addAction(function3Action);
+    trayIconMenu->addAction(accessibilityAction);
     trayIconMenu->addSeparator();
     trayIconMenu->addAction(quitAction);
 
     trayIcon = new QSystemTrayIcon(this);
 
     trayIcon->setIcon(QIcon::fromTheme("dialog-information"));
-    trayIcon->setContextMenu(trayIconMenu);
+    // Workaround for a Qt/macOS bug: setContextMenu() registers for
+    // NSMenuDidBeginTrackingNotification, whose handler calls
+    // [NSApp.currentEvent clickCount] on a non-mouse event, throwing an
+    // NSException and crashing. Instead, show the menu manually on activation.
+    connect(trayIcon, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason) {
+        checkAccessibility();
+        trayIconMenu->popup(QCursor::pos());
+    });
 }
 
 void App::onFunction1() {
@@ -92,6 +105,21 @@ void App::onFunction2() {
 
 void App::onFunction3() {
     settingDialog->show();
+}
+
+void App::checkAccessibility() {
+    bool trusted = AXIsProcessTrusted();
+    if (trusted) {
+        accessibilityAction->setText("辅助功能权限: 已授权");
+        accessibilityAction->setEnabled(false);
+    } else {
+        accessibilityAction->setText("辅助功能权限: 未授权 (点击授权)");
+        accessibilityAction->setEnabled(true);
+    }
+}
+
+void App::onAccessibilityAction() {
+    QDesktopServices::openUrl(QUrl("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"));
 }
 
 void App::setFloatButtonEnabled(bool enabled) {

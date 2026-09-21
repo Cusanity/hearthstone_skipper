@@ -75,13 +75,19 @@ void Skipper::handleGetConnectionThenKill(const QString &error, long code, const
     }
     std::string connection_to_kill;
     for (auto obj : doc["connections"].toArray()) {
+        // 部分 clash 内核（如启用 fake-ip 的 mihomo）会为所有连接填充 metadata.host，
+        // 不能再用 host 是否为空来区分真正的对局连接和 API 请求。
+        // 炉石传说的对局/登录连接固定走 actual.battle.net（端口 1119），
+        // 而 api.blizzard.com 等域名只是非对局的 API 请求，需排除。
         if (obj.isObject() &&
             obj.toObject()["metadata"].toObject()["processPath"].toString().endsWith(
-                "Hearthstone.app/Contents/MacOS/Hearthstone") &&
-            obj.toObject()["metadata"].toObject()["host"] == "") {
-            connection_to_kill = obj.toObject()["id"].toString().toStdString();
-            SPDLOG_LOGGER_INFO(_logger, "Connection to kill {}", connection_to_kill);
-            break;
+                "Hearthstone.app/Contents/MacOS/Hearthstone")) {
+            const QString host = obj.toObject()["metadata"].toObject()["host"].toString();
+            if (host.isEmpty() || host.contains("actual.battle.net")) {
+                connection_to_kill = obj.toObject()["id"].toString().toStdString();
+                SPDLOG_LOGGER_INFO(_logger, "Connection to kill {}", connection_to_kill);
+                break;
+            }
         }
     }
     if (connection_to_kill.empty()) {
@@ -119,6 +125,60 @@ void Skipper::handleKillConnection(const QString &error, long code, const QByteA
         return;
     }
     SPDLOG_LOGGER_INFO(_logger, "DELETE {}", url);
+    
+    // 立即释放 busy 状态并提示成功（使 UI 和反馈瞬间完成），同时在后台进行 5 秒后的二次断连以延长离线窗口
     _busy = false;
     emit skipFinished(true);
+
+    QTimer::singleShot(5000, this, [this]() {
+        const std::string url = _qeasy->config().connections();
+        curl_easy_setopt(_qeasy->curl, CURLOPT_URL, url.c_str());
+        connect(_qeasy, &QCurlEasy::done, this, &Skipper::killAnotherConnection, Qt::SingleShotConnection);
+        _qeasy->perform();
+    });
+}
+
+void Skipper::killAnotherConnection(const QString &error, long code, const QByteArray &body) {
+    curl_easy_setopt(_qeasy->curl, CURLOPT_CUSTOMREQUEST, nullptr);
+    curl_easy_setopt(_qeasy->curl, CURLOPT_HTTPGET, 1L);
+    const std::string url = _qeasy->config().connections();
+    if (!error.isEmpty() || code / 100 != 2) {
+        _busy = false;
+        emit skipFinished(false);
+        return;
+    }
+    auto doc = QJsonDocument::fromJson(body);
+    if (!doc["connections"].isArray()) {
+        _busy = false;
+        emit skipFinished(false);
+        return;
+    }
+    std::string connection_to_kill;
+    for (auto obj : doc["connections"].toArray()) {
+        if (obj.isObject() &&
+            obj.toObject()["metadata"].toObject()["processPath"].toString().endsWith(
+                "Hearthstone.app/Contents/MacOS/Hearthstone")) {
+            const QString host = obj.toObject()["metadata"].toObject()["host"].toString();
+            if (host.isEmpty() || host.contains("actual.battle.net")) {
+                connection_to_kill = obj.toObject()["id"].toString().toStdString();
+                break;
+            }
+        }
+    }
+    if (connection_to_kill.empty()) {
+        // 没有新连接了说明已经保持离线成功
+        _busy = false;
+        emit skipFinished(true);
+        return;
+    }
+    const std::string url2 = _qeasy->config().kill_connection(connection_to_kill);
+    curl_easy_setopt(_qeasy->curl, CURLOPT_URL, url2.c_str());
+    curl_easy_setopt(_qeasy->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+    connect(_qeasy, &QCurlEasy::done, this, [this](const QString &error, long code, const QByteArray &body) {
+        curl_easy_setopt(_qeasy->curl, CURLOPT_CUSTOMREQUEST, nullptr);
+        curl_easy_setopt(_qeasy->curl, CURLOPT_HTTPGET, 1L);
+        _busy = false;
+        emit skipFinished(true);
+    }, Qt::SingleShotConnection);
+    _qeasy->perform();
 }
